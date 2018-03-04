@@ -2,8 +2,20 @@
 #include <PubSubClient.h>
 #include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
-#include "RTClib.h"
+#include <RTClib.h>
 #include <DHT.h>
+
+uint32_t char2UL(const char *str)
+{
+  uint32_t result = 0;
+
+  for (int i = 0; str[i] != '\0'; ++i)
+  {
+    if (!isDigit(str[i])) return 0;
+    result = result*10 + str[i] - '0';
+  }
+  return result;
+}
 
 // RTC
 RTC_DS1307 rtc;
@@ -27,15 +39,17 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 
 // GPIO Pin
-const short GPIO13 = 13; // Auto Lamp in L
-const short GPIO12 = 12; // Outside Lamp in L
+const short GPIO_SEC = 13; // Sec Lamp in L
+const short GPIO_OUT = 12; // Outside Lamp in L
 
 bool status_outlamp = false;
 bool status_serlamp = false;
 
+bool timer_serlamp = true;
+
 // Default ontime at 18:30 and offtime at 5:00
-unsigned short autoLampOnTime = 1110;
-unsigned short autoLampOffTime = 300;
+unsigned short secLampOnTime = 1110;
+unsigned short secLampOffTime = 300;
 
 // Timers auxiliar variables
 long now = millis();
@@ -65,29 +79,57 @@ void callback(String topic, byte* message, unsigned int length)
 
   if (topic == "home/seclamp/set_ontime")
   {
-    autoLampOnTime = messageTemp.toInt();
+    secLampOnTime = messageTemp.toInt();
   }
   else if (topic == "home/seclamp/set_offtime")
   {
-    autoLampOffTime = messageTemp.toInt();
+    secLampOffTime = messageTemp.toInt();
   }
   else if (topic == "home/outlamp/switch")
   {
     if (messageTemp == "on")
     {
-      digitalWrite(GPIO12, LOW);
+      digitalWrite(GPIO_OUT, LOW);
       status_outlamp = true;
     }
     else if (messageTemp == "off")
     {
-      digitalWrite(GPIO12, HIGH);
+      digitalWrite(GPIO_OUT, HIGH);
       status_outlamp = false;
+    }
+  }
+  else if (topic == "home/seclamp/switch_timer") 
+  {
+    if (messageTemp == "on")
+    {
+      timer_serlamp = true;
+    }
+    else if (messageTemp == "off")
+    {
+      timer_serlamp = false;
+    }
+  }
+  else if (topic == "home/seclamp/switch")
+  {
+    if (messageTemp == "on")
+    {
+      digitalWrite(GPIO_SEC, LOW);
+      timer_serlamp = false;
+    }
+    else if (messageTemp == "off")
+    {
+      digitalWrite(GPIO_SEC, HIGH);
+      timer_serlamp = false;
     }
   }
   else if (topic == "home/set_realtime")
   {
-    unsigned int timeunix = messageTemp.toInt();
-    rtc.adjust(DateTime(timeunix));
+    uint32_t timeunix = char2UL(messageTemp.c_str());
+    
+    if (timeunix != 0) 
+    {
+      rtc.adjust(DateTime(timeunix));
+    }
   }
 }
 
@@ -103,6 +145,10 @@ void reconnect() {
       // Subscribe or resubscribe to a topic
       client.subscribe("home/seclamp/set_ontime");
       client.subscribe("home/seclamp/set_offtime");
+
+      client.subscribe("home/seclamp/switch");
+      client.subscribe("home/seclamp/switch_timer");
+
       client.subscribe("home/outlamp/switch");
       client.subscribe("home/set_realtime");
     } 
@@ -117,8 +163,8 @@ void reconnect() {
 
 void setup() 
 {
-  pinMode(GPIO13, OUTPUT);
-  pinMode(GPIO12, OUTPUT);
+  pinMode(GPIO_SEC, OUTPUT);
+  pinMode(GPIO_OUT, OUTPUT);
 
   //Serial.begin(115200);
   setup_wifi();
@@ -143,8 +189,8 @@ void setup()
   }
 
   delay(1000);
-  digitalWrite(GPIO12, HIGH);
-  digitalWrite(GPIO13, HIGH);
+  digitalWrite(GPIO_OUT, HIGH);
+  digitalWrite(GPIO_SEC, HIGH);
 }
 
 DateTime nowTime;
@@ -169,15 +215,19 @@ void loop() {
     lastMeasure = now;
    
     currTime = nowTime.hour()*60 + nowTime.minute();
-    if ((currTime >= autoLampOnTime && currTime <= 1439) || (currTime >= 0 && currTime <= autoLampOffTime))
+
+    if (timer_serlamp == true) 
     {
-      digitalWrite(GPIO13, LOW);
-      status_serlamp = true;
-    }
-    else
-    {
-      digitalWrite(GPIO13, HIGH);
-      status_serlamp = false;
+      if ((currTime >= secLampOnTime && currTime <= 1439) || (currTime >= 0 && currTime <= secLampOffTime))
+      {
+        digitalWrite(GPIO_SEC, LOW);
+        status_serlamp = true;
+      }
+      else
+      {
+        digitalWrite(GPIO_SEC, HIGH);
+        status_serlamp = false;
+      }
     }
     
     static char buffer[19];
@@ -185,13 +235,16 @@ void loop() {
     client.publish("home/realtime", buffer);
     
     static char time_[5];
-    sprintf(time_, "%d", autoLampOnTime);
+    sprintf(time_, "%d", secLampOnTime);
     client.publish("home/seclamp/get_ontime", time_);
-    sprintf(time_, "%d", autoLampOffTime);
+    sprintf(time_, "%d", secLampOffTime);
     client.publish("home/seclamp/get_offtime", time_);
 
     if (status_outlamp) client.publish("home/outlamp/status", "ON");
     else client.publish("home/outlamp/status", "OFF");
+
+    if (status_serlamp) client.publish("home/seclamp/status", "ON");
+    else client.publish("home/seclamp/status", "OFF");
 
     static char localip[16];
     sprintf(localip, "%d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3]);
