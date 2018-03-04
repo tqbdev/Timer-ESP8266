@@ -1,9 +1,12 @@
-#include <ESP8266WiFi.h>
-#include <PubSubClient.h>
-#include <Wire.h> 
-#include <LiquidCrystal_I2C.h>
-#include <RTClib.h>
-#include <DHT.h>
+#include <ESP8266WiFi.h>  //For ESP8266
+#include <ESP8266mDNS.h>  //For OTA
+#include <WiFiUdp.h>      //For OTA
+#include <ArduinoOTA.h>   //For OTA
+#include <PubSubClient.h> //For MQTT
+#include <RTClib.h>       // For Realtime
+#include <DHT.h>          // For Sensor DHT22
+
+#include "config.h"
 
 uint32_t char2UL(const char *str)
 {
@@ -25,23 +28,18 @@ const short DHTPin = 14;
 // Initialize DHT sensor
 DHT dht(DHTPin, DHTTYPE);
 
-// Information about wifi router
-const char* ssid = "####";
-const char* password = "####";
-
-// Information about MQTT server
-const char* mqtt_server = "###.###.###.###";
-const char* mqtt_user = "###";
-const char* mqtt_pass = "###";
-
 // Initializes the espClient
 WiFiClient espClient;
 PubSubClient client(espClient);
+
+//Necesary to make Arduino Software autodetect OTA device
+WiFiServer TelnetServer(8266);
 
 // GPIO Pin
 const short GPIO_SEC = 13; // Sec Lamp in L
 const short GPIO_OUT = 12; // Outside Lamp in L
 
+// Status
 bool status_outlamp = false;
 bool status_serlamp = false;
 
@@ -166,8 +164,10 @@ void setup()
   pinMode(GPIO_SEC, OUTPUT);
   pinMode(GPIO_OUT, OUTPUT);
 
-  //Serial.begin(115200);
   setup_wifi();
+
+  TelnetServer.begin();   //Necesary to make Arduino Software autodetect OTA device  
+  ArduinoOTA.begin();
 
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
@@ -196,7 +196,10 @@ void setup()
 DateTime nowTime;
 unsigned int currTime = 0;
 
-void loop() {
+void loop() 
+{
+  ArduinoOTA.handle();
+
   if (!client.connected()) 
   {
     reconnect();
