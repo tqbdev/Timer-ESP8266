@@ -166,6 +166,10 @@ void setup()
 
   setup_wifi();
 
+  ota_hostName += ESP.getChipId();
+  ArduinoOTA.setHostname(ota_hostName.c_str());
+  ArduinoOTA.setPassword(ota_passWord);
+
   TelnetServer.begin();   //Necesary to make Arduino Software autodetect OTA device  
   ArduinoOTA.begin();
 
